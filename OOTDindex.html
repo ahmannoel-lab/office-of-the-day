@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Office of the Day — A Café Guide</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --paper:#FAF8F3; --card:#FFFFFF; --ink:#2A2520; --muted:#8A8278;
+    --line:#E9E4D9; --matcha:#6B7F5E; --matchaDeep:#4F6147; --matchaSoft:#E8EDE3;
+    --serif: Georgia, 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; overflow:hidden; font-family:var(--sans); color:var(--ink); background:var(--matchaSoft); }
+  #map{ position:absolute; inset:0; z-index:0; background:var(--matchaSoft); }
+  .leaflet-container{ font-family:var(--sans); background:var(--matchaSoft); }
+
+  /* floating chrome */
+  .chrome{ position:absolute; top:0; left:0; right:0; padding:16px; z-index:10;
+    display:flex; align-items:flex-start; justify-content:space-between; pointer-events:none; }
+  .plate{ pointer-events:auto; background:rgba(255,255,255,.92); border:1px solid var(--line);
+    border-radius:16px; padding:10px 16px; backdrop-filter:blur(8px); }
+  .plate .eyebrow{ font-size:9px; letter-spacing:.3em; text-transform:uppercase; color:var(--matcha); }
+  .plate .title{ font-family:var(--serif); font-size:19px; line-height:1.05; }
+  .loc{ pointer-events:auto; width:46px; height:46px; border-radius:999px; display:grid; place-items:center;
+    background:rgba(255,255,255,.92); color:var(--matchaDeep); border:1px solid var(--line);
+    backdrop-filter:blur(8px); cursor:pointer; }
+  .loc.on{ background:var(--matcha); color:#fff; border-color:var(--matcha); }
+  .loc svg{ width:18px; height:18px; }
+
+  /* bottom sheet */
+  .sheet{ position:absolute; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom));
+    z-index:20; height:34vh; overflow:hidden;
+    background:var(--paper); border-radius:26px; box-shadow:0 18px 50px rgba(42,37,32,.22);
+    display:flex; flex-direction:column; transition:height .42s cubic-bezier(.4,0,.2,1); }
+  .sheet.dragging{ transition:none; }
+  .grab{ padding:10px 0 8px; flex:none; cursor:grab; touch-action:none; user-select:none; }
+  .grab .bar{ width:40px; height:5px; border-radius:999px; background:var(--line); margin:0 auto; }
+  .pane{ display:flex; flex-direction:column; min-height:0; flex:1; }
+  .pad{ padding:0 20px; flex:none; }
+  .row-top{ display:flex; align-items:baseline; justify-content:space-between; }
+  .count{ font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .hint{ font-size:12px; color:var(--matcha); }
+
+  .search{ position:relative; margin-top:12px; }
+  .search svg{ position:absolute; left:14px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--muted); }
+  .search input{ width:100%; border:1px solid var(--line); background:var(--card); color:var(--ink);
+    border-radius:999px; padding:10px 16px 10px 38px; font-size:14px; font-family:var(--sans); outline:none; }
+
+  .chips{ display:flex; gap:8px; overflow-x:auto; padding:12px 0; scrollbar-width:none; }
+  .chips::-webkit-scrollbar{ display:none; }
+  .chip{ flex:none; white-space:nowrap; border:1px solid var(--line); background:var(--card); color:var(--ink);
+    border-radius:999px; padding:6px 14px; font-size:12px; cursor:pointer; }
+  .chip.on{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+
+  .list{ padding:0 12px 32px; overflow-y:auto; flex:1; border-top:1px solid var(--line); }
+  .item{ width:100%; text-align:left; background:none; border:none;
+    display:flex; align-items:center; gap:12px; padding:12px 8px; cursor:pointer; }
+  .mono{ flex:none; width:44px; height:44px; border-radius:12px; display:grid; place-items:center;
+    background:var(--matchaSoft); color:var(--matchaDeep); font-family:var(--serif); font-size:15px; }
+  .item .meta{ flex:1; min-width:0; }
+  .item .name{ font-family:var(--serif); font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .sub{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .dist{ font-size:11px; color:var(--matcha); flex:none; }
+  .chev{ width:16px; height:16px; color:var(--line); flex:none; }
+
+  /* accordion */
+  .cafe{ border-bottom:1px solid var(--line); border-radius:16px; transition:background .2s ease; }
+  .cafe.open{ background:var(--matchaSoft); }
+  .cafe .chev{ transition:transform .25s ease; }
+  .cafe.open .chev{ transform:rotate(180deg); color:var(--matcha); }
+  .detail{ padding:2px 16px 18px; animation:expand .26s ease; overflow:hidden; }
+  @keyframes expand{ from{ opacity:0; transform:translateY(-6px);} to{ opacity:1; transform:translateY(0);} }
+  .detail .metaRow{ margin-top:0; }
+  .detail .note{ font-size:14px; line-height:1.55; margin:12px 0 0; }
+  .detail .addr{ font-size:12px; color:var(--muted); margin:8px 0 12px; }
+  .detail .embedWrap{ border:1px solid var(--line); border-radius:16px; overflow:hidden; background:#fff; }
+  .detail .cta{ margin-top:12px; }
+  .btnRow{ display:flex; gap:10px; margin-top:14px; }
+  .btn{ flex:1; display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    border-radius:999px; padding:12px; font-size:14px; text-decoration:none; cursor:pointer; border:none; }
+  .btn svg{ width:16px; height:16px; }
+  .btn-primary{ background:var(--matcha); color:#fff; }
+  .btn-dark{ background:var(--ink); color:var(--paper); }
+
+  /* place detail */
+  .stars{ display:inline-flex; align-items:center; gap:2px; }
+  .stars svg{ width:14px; height:14px; }
+  .metaRow{ display:flex; align-items:center; gap:16px; margin-top:12px; }
+  .cta{ margin-top:16px; width:100%; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    background:var(--ink); color:var(--paper); border:none; border-radius:999px; padding:12px; font-size:14px;
+    text-decoration:none; cursor:pointer; }
+  .cta svg{ width:16px; height:16px; }
+  .note{ font-size:15px; line-height:1.6; }
+  .addr{ font-size:12px; color:var(--muted); margin:12px 0 16px; }
+  .embedWrap{ border:1px solid var(--line); border-radius:16px; overflow:hidden; }
+  .loadingMap{ position:absolute; inset:0; display:grid; place-items:center; z-index:1; color:var(--matchaDeep); font-size:14px; }
+  .muted{ color:var(--muted); }
+  .matcha{ color:var(--matcha); }
+</style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="loadingMap" id="loadingMap">Loading map…</div>
+
+  <div class="chrome">
+    <div class="plate">
+      <div class="eyebrow">A Guide</div>
+      <div class="title">Office of the Day</div>
+    </div>
+    <button class="loc" id="locBtn" title="Find cafés near me" aria-label="Find cafés near me">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+    </button>
+  </div>
+
+  <section class="sheet" id="sheet">
+    <div class="grab" id="grab"><div class="bar"></div></div>
+    <div id="pane" class="pane"></div>
+  </section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===== DATA ===== */
+const CAFES = [
+  { id: 1, name: "Calandra's Bakery", neighborhood: "Fairfield, NJ", address: "244 US Highway 46 E, Fairfield, NJ", lat: 40.8567, lng: -74.2780, rating: 4.8, vibe: "Bakery", note: "A Fairfield institution. Oven-fresh pastries, a corner seat in the light, and the kind of neighborhood ease that makes you stay all morning.", hours: "6:30am – 5pm", instagramUrl: "https://www.instagram.com/reel/DYqCukZpsiL/" },
+  { id: 2, name: "Yasmeen 2", neighborhood: "Cresskill, NJ", address: "39 Union Ave, Cresskill, NJ", lat: 40.9583, lng: -73.9228, rating: 4.7, vibe: "Mediterranean", note: "Warm, welcoming, and easy to settle into. Good coffee, steady wifi, the sort of room that quietly invites you to get something done.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DX5HhMMp1AE/" },
+  { id: 3, name: "Beni Coffee", neighborhood: "Union City, NJ", address: "216 19th St, Union City, NJ", lat: 40.7476, lng: -74.0220, rating: 4.6, vibe: "Specialty Coffee", note: "Clean lines, careful light, real attention to the cup. A modern room where the afternoon disappears on you.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/DVo68NtiW83/" },
+  { id: 4, name: "HeyTea", neighborhood: "Paramus, NJ", address: "1 Garden State Plaza, Fl 2, Paramus, NJ", lat: 40.9557, lng: -74.0626, rating: 4.9, vibe: "Tea House", note: "Tea taken seriously. Every drink is built with intention, in a room that asks you to slow down and focus.", hours: "10am – 9pm", instagramUrl: "https://www.instagram.com/reel/DVeunB6if3G/" },
+  { id: 5, name: "Grind Coffee Shop", neighborhood: "Jersey City, NJ", address: "293 Suydam Ave, Jersey City, NJ", lat: 40.7178, lng: -74.0431, rating: 4.8, vibe: "Specialty Coffee", note: "No shortcuts — single-origin, carefully sourced, made by people who plainly care. You taste the difference.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/DTq21tCicZj/" },
+  { id: 6, name: "Haute Dulce", neighborhood: "Secaucus, NJ", address: "700 Plaza Dr, Ste 137, Secaucus, NJ", lat: 40.7739, lng: -74.0022, rating: 4.7, vibe: "Bakery", note: "Exceptional pastry in an unassuming spot — the small thrill of finding something lovely where you didn't expect it.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DMoI9XmJDWO/" },
+  { id: 7, name: "Maxine's Bakeshop", neighborhood: "Westwood, NJ", address: "277 Westwood Ave, Westwood, NJ", lat: 40.9817, lng: -74.0228, rating: 4.6, vibe: "Bakery", note: "A neighborhood favorite that keeps getting better. Window seats, regulars, laptops open — and somehow always room for you.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/DML0g0LpIk5/" },
+  { id: 8, name: "Palmas Cafe", neighborhood: "Cranford, NJ", address: "32 North Ave W, Cranford, NJ", lat: 40.6645, lng: -74.3028, rating: 4.7, vibe: "Latin Café", note: "Authentic café culture with welcoming energy — nothing forced, just good coffee and a room that feels lived-in.", hours: "6am – 7pm", instagramUrl: "https://www.instagram.com/reel/DPPguY1idrv/" },
+  { id: 9, name: "Park Cafe + Restaurant", neighborhood: "West New York, NJ", address: "6001 Blvd East, West New York, NJ", lat: 40.7653, lng: -74.0092, rating: 4.8, vibe: "Café + Kitchen", note: "Part café, part restaurant, fully functional — and the waterfront view doesn't hurt the workday.", hours: "7am – 9pm", instagramUrl: "https://www.instagram.com/reel/DSbCU4BCanm/" },
+  { id: 10, name: "Queen City Coffee Roasters", neighborhood: "Clifton, NJ", address: "1132 US-46 W, Clifton, NJ", lat: 40.8564, lng: -74.1469, rating: 4.9, vibe: "Roastery", note: "They roast their own, and the control shows — consistent, considered, and run by people who know the craft.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DTY1ZrHiXT6/" },
+  { id: 11, name: "Cheongsu", neighborhood: "Fort Lee, NJ", address: "1644 Parker Ave, Fort Lee, NJ", lat: 40.8516, lng: -73.9719, rating: 4.7, vibe: "Korean Café", note: "Minimal by design. Every element is intentional, the focus stays on the drink and the quiet of the moment.", hours: "10am – 9pm", instagramUrl: "https://www.instagram.com/reel/DK-kXX5JypC/" },
+  { id: 12, name: "Awe & Wonder", neighborhood: "Tenafly, NJ", address: "35 Highwood Ave, Tenafly, NJ", lat: 40.9386, lng: -73.9548, rating: 4.8, vibe: "Indie Coffee", note: "The neighborhood-gem feeling — locals belong, visitors are welcome, and time moves a little slower.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DI90tVMJcht/" },
+  { id: 13, name: "Yasmeen", neighborhood: "Clifton, NJ", address: "247 Piaget Ave, Clifton, NJ", lat: 40.8600, lng: -74.1500, rating: 4.7, vibe: "Mediterranean", note: "Simple room, excellent execution — the kind of café that doesn't try hard because it doesn't need to.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DKLEe0wpMiE/" },
+  { id: 14, name: "Java Smugglers", neighborhood: "Boonton, NJ", address: "922 Main St, Boonton, NJ", lat: 40.8825, lng: -74.4128, rating: 4.6, vibe: "Indie Coffee", note: "Boonton's creative corner. Quiet enough to work, lively enough to feel alive, with Main Street right outside.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DIuX8dqpH0z/" },
+  { id: 15, name: "Perla Coffee Co. & Eatery", neighborhood: "Woodbridge, NJ", address: "96 Main St, Woodbridge, NJ", lat: 40.5661, lng: -74.2866, rating: 4.8, vibe: "Café + Kitchen", note: "Serious but not stiff — good food, excellent coffee, and a space that clearly got some thought.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DIZzM4gJgi4/" },
+  { id: 16, name: "Pink Pistachio", neighborhood: "Somerset, NJ", address: "1101 Randolph Rd, Somerset, NJ", lat: 40.5022, lng: -74.4733, rating: 4.7, vibe: "Indie Coffee", note: "Playful room, serious coffee. Photogenic without being only that — it's genuinely good underneath.", hours: "8am – 6pm", instagramUrl: "https://www.instagram.com/reel/DIHwCn1pIPp/" },
+  { id: 17, name: "Leo Brother's Cafe", neighborhood: "Piscataway, NJ", address: "371 Hoes Ln, Piscataway, NJ", lat: 40.5531, lng: -74.4605, rating: 4.6, vibe: "Family Café", note: "They learn your name. The sort of place you become a part of once you start showing up.", hours: "6am – 8pm", instagramUrl: "https://www.instagram.com/reel/DH1uXpeRYM7/" },
+  { id: 18, name: "Damasco Cafe", neighborhood: "Clifton, NJ", address: "600 Getty Ave, Clifton, NJ", lat: 40.8700, lng: -74.1600, rating: 4.7, vibe: "Classic Café", note: "No frills, all substance — a room that's been perfecting the same small ritual for years.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/DHRrFqFRPfB/" },
+  { id: 19, name: "Palazzone 1960", neighborhood: "Wayne, NJ", address: "190 Rt 23 N, Wayne, NJ", lat: 40.8589, lng: -74.2247, rating: 4.8, vibe: "Italian Café", note: "Open since 1960. That kind of track record means they understand consistency better than most.", hours: "7am – 5pm", instagramUrl: "https://www.instagram.com/reel/DG_prgbRNP7/" },
+  { id: 20, name: "Caribbrew", neighborhood: "Newark, NJ", address: "73-87 Clay St, Newark, NJ", lat: 40.7357, lng: -74.1724, rating: 4.9, vibe: "Caribbean Café", note: "Caribbean culture done right — warm, energetic, and the coffee carries the same care as the room.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DGO1h0qR6pr/" },
+  { id: 21, name: "Pura Vida", neighborhood: "Williamsburg, NY", address: "25 Kent Ave, Brooklyn, NY", lat: 40.7220, lng: -73.9580, rating: 4.7, vibe: "Café", note: "That downtown sensibility without the attitude. Good coffee, good people, an easy place to lose an afternoon.", hours: "8am – 7pm", instagramUrl: "https://www.instagram.com/reel/DF6O6yWRC28/" },
+  { id: 22, name: "Chashni", neighborhood: "Montclair, NJ", address: "349 Bloomfield Ave, Montclair, NJ", lat: 40.8192, lng: -74.2089, rating: 4.8, vibe: "Specialty Coffee", note: "Drinks made with real care, a creative streak, and a downtown Montclair address that's hard to beat.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DFlonDgxlo_/" },
+  { id: 23, name: "Island Spa & Sauna", neighborhood: "Edison, NJ", address: "1769 Lincoln Hwy, Edison, NJ", lat: 40.5214, lng: -74.3706, rating: 4.6, vibe: "Wellness Café", note: "A different kind of work spot — café culture folded into a wellness day. Reset, then refocus.", hours: "10am – 10pm", instagramUrl: "https://www.instagram.com/reel/DFBllJERBD0/" },
+  { id: 24, name: "Ayala Coffee", neighborhood: "Union, NJ", address: "946 Stuyvesant Ave, Union, NJ", lat: 40.6943, lng: -74.2615, rating: 4.7, vibe: "Latin Café", note: "More than coffee — a room built around community and culture. You feel it the moment you walk in.", hours: "6am – 7pm", instagramUrl: "https://www.instagram.com/reel/DEir_QxR8cX/" },
+  { id: 25, name: "Birdies & Lattes", neighborhood: "Edison, NJ", address: "1781 Lincoln Hwy, Unit 201, Edison, NJ", lat: 40.5260, lng: -74.3750, rating: 4.8, vibe: "Indie Coffee", note: "Golf and coffee, somehow exactly right. Light on its feet, real in the cup, impossible not to smile in.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DELgj2Xx6_S/" },
+  { id: 26, name: "M by MOKAFE", neighborhood: "Jersey City, NJ", address: "273 16th St, Jersey City, NJ", lat: 40.7300, lng: -74.0480, rating: 4.7, vibe: "Specialty Coffee", note: "Every element earns its place. Clean design, precise execution, the coffee kept firmly in focus.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/DBFI47zx7zV/" },
+  { id: 27, name: "Soma Cafe & Creperie", neighborhood: "Waldwick, NJ", address: "41 W Prospect St, Waldwick, NJ", lat: 41.0461, lng: -74.1058, rating: 4.8, vibe: "French Café", note: "A small slice of France in Bergen County — careful with the crêpe and careful with the cup.", hours: "8am – 6pm", instagramUrl: "https://www.instagram.com/reel/DAmPVwhxtaf/" },
+  { id: 28, name: "Ethan & The Bean", neighborhood: "Little Falls, NJ", address: "98 Main St, Little Falls, NJ", lat: 40.8658, lng: -74.2211, rating: 4.6, vibe: "Indie Coffee", note: "Bringing Main Street back to life, one cup at a time — the kind of place that makes staying home feel cool.", hours: "7am – 5pm", instagramUrl: "https://www.instagram.com/reel/C-3hFq3x9pw/" },
+  { id: 29, name: "Roast & Cream", neighborhood: "Union City, NJ", address: "1620 Bergenline Ave, Union City, NJ", lat: 40.7600, lng: -74.0300, rating: 4.9, vibe: "Coffee + Dessert", note: "Doesn't announce itself, just delivers — good coffee, comfortable seats, the consistency that makes it yours.", hours: "6am – 7pm", instagramUrl: "https://www.instagram.com/reel/C90lZ3lR4SB/" },
+  { id: 30, name: "Bluestone Lane", neighborhood: "Maywood, NJ", address: "420 Bergen Town Center, Maywood, NJ", lat: 40.9203, lng: -74.0780, rating: 4.7, vibe: "Australian Café", note: "A chain that kept its character — reliable, bright, and easy to drop into for a working hour.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/C9LXXuQxvuB/" },
+  { id: 31, name: "Dr. Fruit", neighborhood: "Paterson, NJ", address: "867 Main St, Paterson, NJ", lat: 40.9176, lng: -74.2012, rating: 4.6, vibe: "Health Café", note: "Beyond coffee — a real focus on fresh. Smoothies, bright ingredients, and a room that feels awake.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/C6M0BaxxbmK/" },
+  { id: 32, name: "Orange House Cafe", neighborhood: "Orange, NJ", address: "32 Lincoln Ave, Orange, NJ", lat: 40.7658, lng: -74.2445, rating: 4.8, vibe: "Community Café", note: "A community anchor more than a coffee shop — welcoming by design, and proud of it.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/C5hDHVyRxWX/" },
+  { id: 33, name: "Khyber Coffee & Tea House", neighborhood: "New Brunswick, NJ", address: "110 Church St, New Brunswick, NJ", lat: 40.4860, lng: -74.4518, rating: 4.7, vibe: "Tea House", note: "Takes both tea and coffee seriously — cultural authenticity meeting modern café standards.", hours: "8am – 8pm", instagramUrl: "https://www.instagram.com/reel/C5PB2wZxoMg/" },
+  { id: 34, name: "Summer Blends", neighborhood: "Glen Rock, NJ", address: "204 Rock Rd, Glen Rock, NJ", lat: 40.9767, lng: -74.1128, rating: 4.8, vibe: "Indie Coffee", note: "Light and seasonal. The room feels like a deep breath, and the drinks are built with real thought.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/C4q-pXuOBMe/" },
+  { id: 35, name: "MOKAFÉ Coffee House", neighborhood: "Paterson, NJ", address: "1022 Main St, Paterson, NJ", lat: 40.9100, lng: -74.1700, rating: 4.6, vibe: "Specialty Coffee", note: "Plainly prioritizes the coffee, and that focus carries through to an experience that feels considered.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/C0uviyiLL_B/" },
+  { id: 36, name: "Dulce De Leche Bakery", neighborhood: "Englewood, NJ", address: "55 W Palisade Ave, Englewood, NJ", lat: 40.8788, lng: -73.9759, rating: 4.7, vibe: "Bakery", note: "South American bakery culture on the Palisades — alfajores, espresso, and a whole lot of warmth.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/Cz2GBW6Rxh2/" },
+  { id: 37, name: "Marimba Cafe", neighborhood: "Hackensack, NJ", address: "10 Banta Pl, Hackensack, NJ", lat: 40.8856, lng: -74.0432, rating: 4.8, vibe: "Latin Café", note: "The name sets the tone — rhythm, energy, and coffee that keeps pace with the room.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CzZxRBlRrAj/" },
+  { id: 38, name: "Catalano Coffee", neighborhood: "Glen Rock, NJ", address: "1016 S Maple Ave, Glen Rock, NJ", lat: 40.9700, lng: -74.1200, rating: 4.7, vibe: "Italian Café", note: "Respect for tradition without being stuck in it — classic café values, cleanly executed.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/CzCfYHNROng/" },
+  { id: 39, name: "JACX & CO", neighborhood: "Long Island City, NY", address: "28-17 Jackson Ave, Long Island City, NY", lat: 40.7484, lng: -73.9410, rating: 4.9, vibe: "Café + Kitchen", note: "Industrial bones, refined finish — the kind of room LIC's creatives have quietly claimed as their own.", hours: "8am – 6pm", instagramUrl: "https://www.instagram.com/reel/CxbfWXBRwL4/" },
+  { id: 40, name: "Early Bird Coffee & More", neighborhood: "Cresskill, NJ", address: "29 E Madison Ave, Unit 6, Cresskill, NJ", lat: 40.9600, lng: -73.9280, rating: 4.6, vibe: "Indie Coffee", note: "Built for the morning people — the space, the service, the coffee, all tuned to an early start.", hours: "5:30am – 6pm", instagramUrl: "https://www.instagram.com/reel/Cw3ciRiRRYM/" },
+  { id: 41, name: "Ace Hotel Brooklyn", neighborhood: "Boerum Hill, NY", address: "252 Schermerhorn St, Brooklyn, NY", lat: 40.6880, lng: -73.9830, rating: 4.8, vibe: "Hotel Café", note: "Ace knows how to design a room, and the café inherits all of it — composed, comfortable, quietly cool.", hours: "7am – 10pm", instagramUrl: "https://www.instagram.com/reel/CvGJaAaOJw7/" },
+  { id: 42, name: "Carlos Bagel Shop", neighborhood: "Hawthorne, NJ", address: "438 Lafayette Ave, Hawthorne, NJ", lat: 40.9431, lng: -74.1635, rating: 4.7, vibe: "Bagels + Coffee", note: "One thing, done right. Coffee in good company with an excellent bagel — simple and effective.", hours: "6am – 4pm", instagramUrl: "https://www.instagram.com/reel/DT_dSzZCSPm/" },
+  { id: 43, name: "Iconic Coffee", neighborhood: "Hackensack, NJ", address: "157 Main St, Hackensack, NJ", lat: 40.8900, lng: -74.0500, rating: 4.6, vibe: "Specialty Coffee", note: "A downtown anchor with staying power — and staying power usually means they're doing it right.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/CtNH6mbLFUv/" },
+  { id: 44, name: "Honey Day Coffee & Kitchen", neighborhood: "Glen Rock, NJ", address: "228 Rock Rd, Glen Rock, NJ", lat: 40.9750, lng: -74.1150, rating: 4.9, vibe: "Café + Kitchen", note: "Sweet name, sweeter execution — genuinely welcoming, and the kind of room you plan to return to.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CspEHrAOelC/" },
+  { id: 45, name: "Paper Plane Coffee Co.", neighborhood: "Montclair, NJ", address: "61 N Fullerton Ave, Montclair, NJ", lat: 40.8230, lng: -74.2110, rating: 4.8, vibe: "Indie Coffee", note: "Light, artful, intentional — the name says it and the room delivers on the whole package.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CrMBWf7NGo4/" },
+  { id: 46, name: "Thumbody", neighborhood: "Paramus, NJ", address: "80 NJ-4 E, Paramus, NJ", lat: 40.9300, lng: -74.0700, rating: 4.7, vibe: "Wellness Café", note: "Not just coffee — a small wellness destination, from green juice to a genuinely good cup.", hours: "8am – 7pm", instagramUrl: "https://www.instagram.com/reel/Cqq4ZAnPnSo/" },
+  { id: 47, name: "Sihana Café", neighborhood: "Newark, NJ", address: "71 Ferry St, Newark, NJ", lat: 40.7280, lng: -74.1550, rating: 4.6, vibe: "Middle Eastern", note: "Middle Eastern café tradition in the Ironbound — authentic, welcoming, and quietly excellent.", hours: "7am – 8pm", instagramUrl: "https://www.instagram.com/reel/CplLCbTpP_Z/" },
+  { id: 48, name: "Jackie Smalls", neighborhood: "Wayne, NJ", address: "584 Valley Rd, Wayne, NJ", lat: 40.9100, lng: -74.2500, rating: 4.8, vibe: "Neighborhood Café", note: "Gets the balance right — comfortable enough to linger, good enough to make lingering worth it.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CoDUXPCu9vv/" },
+  { id: 49, name: "Mercado", neighborhood: "Montclair, NJ", address: "605 Valley Rd, Montclair, NJ", lat: 40.8300, lng: -74.2150, rating: 4.7, vibe: "Market Café", note: "A gathering place as much as a café — that mix of small commerce and real connection is the whole point.", hours: "8am – 7pm", instagramUrl: "https://www.instagram.com/reel/CnXh6cgsV0P/" },
+  { id: 50, name: "PUBLIC Hotel", neighborhood: "Lower East Side, NY", address: "215 Chrystie St, New York, NY", lat: 40.7230, lng: -73.9920, rating: 4.9, vibe: "Hotel Café", note: "PUBLIC knows public space, and the café carries that design sense — composed, generous, easy to work in.", hours: "7am – 11pm", instagramUrl: "https://www.instagram.com/reel/Cgc36f8l1HX/" },
+  { id: 51, name: "Hybrid Coffee & Kitchen", neighborhood: "Jersey City, NJ", address: "398 Manila Ave, Jersey City, NJ", lat: 40.7250, lng: -74.0450, rating: 4.8, vibe: "Café + Kitchen", note: "Coffee and food that complement rather than compete — thoughtful on every level, true to the name.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CfuPSVbFGeZ/" },
+  { id: 52, name: "Semicolon Cafe", neighborhood: "Jersey City, NJ", address: "77 Hudson St, Jersey City, NJ", lat: 40.7150, lng: -74.0360, rating: 4.6, vibe: "Indie Coffee", note: "The name signals the intention — a room, a cup, and an energy all aligned toward quiet focus.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/CePPh9IFFOw/" },
+  { id: 53, name: "Bogota Press Cafe", neighborhood: "Bogota, NJ", address: "1000 W Fort Lee Rd, Bogota, NJ", lat: 40.8763, lng: -74.0959, rating: 4.7, vibe: "Colombian Café", note: "Colombian coffee culture understood from the inside — and it shows in the cup, and the welcome.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/CdqifVwllgV/" },
+  { id: 54, name: "Sugar Tree Cafe", neighborhood: "Nutley, NJ", address: "358 Passaic Ave, Nutley, NJ", lat: 40.8206, lng: -74.1680, rating: 4.8, vibe: "Neighborhood Café", note: "Feels like visiting a friend. That ease and consistency is exactly what builds real regulars.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/CcyiS1AFEWJ/" },
+  { id: 55, name: "Bite Food & Coffee Co.", neighborhood: "Hackensack, NJ", address: "360 Essex St, Hackensack, NJ", lat: 40.8800, lng: -74.0550, rating: 4.9, vibe: "Café + Kitchen", note: "No compromise — food and coffee both get the care they deserve, in a room that reflects it.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/CcjF81eFIvZ/" },
+  { id: 56, name: "Steven's Cafe", neighborhood: "Rutherford, NJ", address: "106 Park Ave, Rutherford, NJ", lat: 40.8332, lng: -74.1089, rating: 4.6, vibe: "Classic Café", note: "Part of the town's fabric for years — that continuity means they understand what regulars need.", hours: "6am – 6pm", instagramUrl: "https://www.instagram.com/reel/CcEL9bVFVZZ/" },
+  { id: 57, name: "Kuppi Coffee Company", neighborhood: "Edgewater, NJ", address: "725 River Rd, Edgewater, NJ", lat: 40.8211, lng: -73.9919, rating: 4.7, vibe: "Specialty Coffee", note: "A modern take on the classic café — design and coffee both clearly the product of real thought.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/Cb_B_BTFNz_/" },
+  { id: 58, name: "Gregorys Coffee", neighborhood: "Paramus, NJ", address: "393 NJ-17 S, Paramus, NJ", lat: 40.9450, lng: -74.0700, rating: 4.8, vibe: "Specialty Coffee", note: "A chain run with care — consistent without going generic, the kind of spot you can count on.", hours: "7am – 7pm", instagramUrl: "https://www.instagram.com/reel/Cb8ekyrlGJO/" },
+  { id: 59, name: "Cafe Hesed", neighborhood: "Little Ferry, NJ", address: "260 Bergen Tpke, Little Ferry, NJ", lat: 40.8492, lng: -74.0337, rating: 4.6, vibe: "Community Café", note: "Hesed means loving-kindness, and the room lives up to it — service, space and coffee all built on care.", hours: "7am – 5pm", instagramUrl: "https://www.instagram.com/reel/Cb0xFo1p_Fs/" },
+  { id: 60, name: "Cafe Trois", neighborhood: "Fort Lee, NJ", address: "1475 Bergen Blvd, Unit 4, Fort Lee, NJ", lat: 40.8550, lng: -73.9750, rating: 4.9, vibe: "French Café", note: "Three things — coffee, pastry, room — each handled with a Parisian sense of care.", hours: "7am – 6pm", instagramUrl: "https://www.instagram.com/reel/Cbzxj2eFj-a/" },
+];
+
+/* ===== ICONS (inline svg strings) ===== */
+const ICON = {
+  pin:'<polyline points="3 11 22 2 13 21 11 13 3 11"/>',
+  chev:'<polyline points="9 18 15 12 9 6"/>',
+  chevDown:'<polyline points="6 9 12 15 18 9"/>',
+  search:'<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  arrow:'<line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>',
+  nav:'<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
+};
+const svg = (paths, cls='') =>
+  `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+const stars = (v) => {
+  let s='<span class="stars">';
+  for(let i=0;i<5;i++){ const f=i<Math.round(v); s+=`<svg viewBox="0 0 24 24" fill="${f?'var(--matcha)':'var(--line)'}" stroke="${f?'var(--matcha)':'var(--line)'}" stroke-width="1.5"><polygon points="12 2 15 9 22 9.3 17 14 18.5 21 12 17.3 5.5 21 7 14 2 9.3 9 9"/></svg>`; }
+  s+=`<span class="muted" style="font-size:12px;margin-left:6px">${v.toFixed(1)}</span></span>`; return s;
+};
+const monogram = (name) => {
+  const p = name.replace(/[^a-zA-Z ]/g,'').trim().split(/\s+/);
+  return (p.length===1 ? p[0].slice(0,2) : p[0][0]+p[1][0]).toUpperCase();
+};
+const haversine=(a,b,c,d)=>{const R=3959,r=x=>x*Math.PI/180;const dLat=r(c-a),dLng=r(d-b);
+  const h=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
+
+/* ===== STATE ===== */
+const state = { query:'', hood:'All', selected:null, origin:null, geo:'idle', view:'guide', frac:0.40, dragging:false };
+const DETENTS=[0.12,0.40,0.95], PEEK=DETENTS[0], FULL=DETENTS[2];
+const hoods = ['All', ...Array.from(new Set(CAFES.map(c=>c.neighborhood.split(',')[0]))).sort()];
+
+function results(){
+  let list = CAFES.filter(c=>{
+    const q=state.query.toLowerCase();
+    const hitQ=!q||c.name.toLowerCase().includes(q)||c.neighborhood.toLowerCase().includes(q)||c.vibe.toLowerCase().includes(q);
+    const hitH=state.hood==='All'||c.neighborhood.split(',')[0]===state.hood;
+    return hitQ&&hitH;
+  });
+  if(state.origin){ list=list.map(c=>({...c,dist:haversine(state.origin.lat,state.origin.lng,c.lat,c.lng)})).sort((a,b)=>a.dist-b.dist); }
+  return list;
+}
+const distFor=(c)=>{ const m=results().find(r=>r.id===c.id); return m&&m.dist!=null?m.dist:null; };
+
+/* ===== MAP ===== */
+let map, markerLayer, originMarker;
+function initMap(){
+  map = L.map('map',{ zoomControl:false, attributionControl:true }).setView([40.82,-74.10],10);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    { subdomains:'abcd', maxZoom:19, attribution:'© OpenStreetMap © CARTO' }).addTo(map);
+  map.on('click',()=>{ if(state.selected){ state.selected=null; drawMarkers(); renderPaneListOnly(); } });
+  document.getElementById('loadingMap').style.display='none';
+  drawMarkers();
+}
+function pinIcon(sel,dim){
+  const fill = sel?'#4F6147':'#6B7F5E', sz=sel?36:28, h=sel?46:36;
+  const html =
+    `<svg width="${sz}" height="${h}" viewBox="-13 -34 26 34" xmlns="http://www.w3.org/2000/svg" style="opacity:${dim?0.3:1}">
+       <ellipse cx="0" cy="-1" rx="6" ry="2.2" fill="rgba(0,0,0,0.18)"/>
+       <path d="M0 0 C -5 -10 -9 -13 -9 -19 A 9 9 0 1 1 9 -19 C 9 -13 5 -10 0 0 Z" fill="${fill}" stroke="#fff" stroke-width="2"/>
+       <circle cx="0" cy="-19" r="3.4" fill="#fff"/>
+     </svg>`;
+  return L.divIcon({ className:'', html, iconSize:[sz,h], iconAnchor:[sz/2,h] });
+}
+function drawMarkers(){
+  if(!map) return;
+  const vis = new Set(results().map(c=>c.id));
+  if(markerLayer){ map.removeLayer(markerLayer); }
+  markerLayer = L.layerGroup().addTo(map);
+  CAFES.forEach(c=>{
+    const sel = state.selected && state.selected.id===c.id;
+    const m = L.marker([c.lat,c.lng],{ icon:pinIcon(sel,!vis.has(c.id)), zIndexOffset: sel?1000:0 });
+    m.on('click',()=>openPlace(c));
+    m.addTo(markerLayer);
+  });
+}
+function drawOrigin(){
+  if(!map) return;
+  if(originMarker){ map.removeLayer(originMarker); originMarker=null; }
+  if(state.origin){
+    originMarker = L.circleMarker([state.origin.lat,state.origin.lng],
+      { radius:7, color:'#fff', weight:2.5, fillColor:'#3B6CD9', fillOpacity:1 }).addTo(map);
+  }
+}
+
+/* ===== ACTIONS ===== */
+function openPlace(c){
+  const same = state.selected && state.selected.id===c.id;
+  state.selected = same ? null : c;
+  drawMarkers();
+  if(state.selected){
+    setFrac(Math.max(state.frac, 0.6));
+    if(map) map.flyTo([c.lat,c.lng], Math.max(13, map.getZoom()), { duration:0.6 });
+  }
+  renderPaneListOnly();
+  if(state.selected){
+    requestAnimationFrame(()=>{
+      const el=document.querySelector('.cafe.open');
+      if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
+    });
+  }
+}
+function setHood(h){ state.hood=h; if(state.selected && state.hood!=='All' && state.selected.neighborhood.split(',')[0]!==h) state.selected=null; drawMarkers(); renderPane(); }
+function setQuery(q){ state.query=q; drawMarkers(); renderPaneListOnly(); }
+
+function toggleNear(){
+  if(state.geo==='on'){ state.origin=null; state.geo='idle'; drawOrigin(); drawMarkers(); renderChrome(); renderPane(); return; }
+  if(!navigator.geolocation){ state.geo='denied'; renderChrome(); return; }
+  state.geo='loading'; renderChrome();
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{ state.origin={lat:pos.coords.latitude,lng:pos.coords.longitude}; state.geo='on';
+      let best=CAFES[0],bd=Infinity;
+      CAFES.forEach(c=>{const d=haversine(state.origin.lat,state.origin.lng,c.lat,c.lng); if(d<bd){bd=d;best=c;}});
+      drawOrigin(); renderChrome(); openPlace(best);
+    },
+    ()=>{ state.geo='denied'; renderChrome(); },
+    { timeout:8000 }
+  );
+}
+
+/* ===== RENDER ===== */
+function renderChrome(){
+  const btn=document.getElementById('locBtn');
+  btn.classList.toggle('on', state.geo==='on');
+}
+function setFrac(f){
+  state.frac=f;
+  document.getElementById('sheet').style.height=(f*100)+'vh';
+  const ch=document.querySelector('.chrome');
+  if(ch){ const hide=f>0.7; ch.style.transition='opacity .3s ease'; ch.style.opacity=hide?'0':'1'; ch.style.pointerEvents=hide?'none':''; }
+}
+
+function detailHTML(c, d){
+  const dir = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(c.address);
+  return `<div class="detail">
+    <div class="metaRow">${stars(c.rating)}<span class="muted" style="font-size:14px">${c.hours}</span></div>
+    <p class="note">${c.note}</p>
+    <p class="addr">${c.address}</p>
+    <div class="embedWrap">
+      <blockquote class="instagram-media" data-instgrm-permalink="${c.instagramUrl}" data-instgrm-version="14"
+        style="background:#FFF;border:0;margin:0;padding:0;width:100%;min-width:unset"></blockquote>
+    </div>
+    <div class="btnRow">
+      <a class="btn btn-primary" href="${dir}" target="_blank" rel="noopener noreferrer">${svg(ICON.nav)} Directions</a>
+      <a class="btn btn-dark" href="${c.instagramUrl}" target="_blank" rel="noopener noreferrer">${svg(ICON.arrow)} Review</a>
+    </div>
+  </div>`;
+}
+
+function listHTML(){
+  const list=results();
+  if(list.length===0){ return `<div style="text-align:center;padding:40px 0">
+      <div style="font-family:var(--serif);font-size:18px">No cafés here yet</div>
+      <div class="muted" style="font-size:14px;margin-top:4px">Try another town or clear your search.</div></div>`; }
+  return list.map(c=>{
+    const d=distFor(c);
+    const open = state.selected && state.selected.id===c.id;
+    return `<div class="cafe ${open?'open':''}" data-id="${c.id}">
+      <button class="item" data-id="${c.id}">
+        <div class="mono">${monogram(c.name)}</div>
+        <div class="meta">
+          <div style="display:flex;justify-content:space-between;gap:8px">
+            <span class="name">${c.name}</span>
+            ${d!=null?`<span class="dist">${d.toFixed(1)} mi</span>`:''}
+          </div>
+          <div class="sub">${c.vibe} · ${c.neighborhood}</div>
+        </div>
+        ${svg(ICON.chevDown,'chev')}
+      </button>
+      ${open?detailHTML(c,d):''}
+    </div>`;
+  }).join('');
+}
+
+function renderPane(){
+  const pane=document.getElementById('pane');
+  pane.innerHTML = `
+    <div class="pad">
+      <div class="row-top">
+        <span class="count">${results().length} ${results().length===1?'café':'cafés'} · North NJ &amp; NYC</span>
+        ${state.frac<=PEEK+0.02?'<span class="hint">Swipe up ↑</span>':''}
+      </div>
+      <div class="search">${svg(ICON.search)}<input id="searchInput" placeholder="Search a café or town" value="${state.query.replace(/"/g,'&quot;')}"/></div>
+      <div class="chips" id="chips">
+        ${hoods.map(h=>`<button class="chip ${state.hood===h?'on':''}" data-hood="${h}">${h}</button>`).join('')}
+      </div>
+    </div>
+    <div class="list" id="list">${listHTML()}</div>`;
+  wireGuide();
+  if(state.selected) processEmbeds();
+}
+// lighter re-render when only the list changes (keeps input focus)
+function renderPaneListOnly(){
+  const list=document.getElementById('list');
+  if(!list){ renderPane(); return; }
+  const count=document.querySelector('.count');
+  if(count) count.innerHTML = `${results().length} ${results().length===1?'café':'cafés'} · North NJ &amp; NYC`;
+  list.innerHTML=listHTML(); wireList();
+  if(state.selected) processEmbeds();
+}
+function wireList(){
+  document.querySelectorAll('.item').forEach(el=>{
+    el.onclick=()=>{ const id=+el.dataset.id; const c=CAFES.find(x=>x.id===id); openPlace(c); };
+  });
+}
+function wireGuide(){
+  const input=document.getElementById('searchInput');
+  if(input){ input.oninput=(e)=>setQuery(e.target.value); input.onfocus=()=>{ setFrac(FULL); }; }
+  document.querySelectorAll('#chips .chip').forEach(el=>{ el.onclick=()=>setHood(el.dataset.hood); });
+  wireList();
+}
+
+/* ===== Instagram embeds ===== */
+let igLoaded=false;
+function processEmbeds(){
+  const run=()=>{ if(window.instgrm&&window.instgrm.Embeds){ window.instgrm.Embeds.process(); return true;} return false; };
+  if(igLoaded){ run(); return; }
+  if(!document.getElementById('ig-embed')){
+    const s=document.createElement('script'); s.id='ig-embed'; s.async=true;
+    s.src='https://www.instagram.com/embed.js'; s.onload=()=>{ igLoaded=true; run(); };
+    document.body.appendChild(s);
+  }
+  let n=0; const t=setInterval(()=>{ n++; if(run()||n>12){ igLoaded=true; clearInterval(t);} },400);
+}
+
+/* ===== SHEET DRAG ===== */
+(function(){
+  const grab=document.getElementById('grab'), sheet=document.getElementById('sheet');
+  let startY=0, startFrac=0, moved=0;
+  grab.addEventListener('pointerdown',(e)=>{ startY=e.clientY; startFrac=state.frac; moved=0;
+    state.dragging=true; sheet.classList.add('dragging'); try{grab.setPointerCapture(e.pointerId);}catch(_){} });
+  grab.addEventListener('pointermove',(e)=>{ if(!state.dragging) return;
+    const dy=startY-e.clientY; moved=Math.max(moved,Math.abs(dy));
+    const f=Math.min(FULL,Math.max(0.10,startFrac+dy/window.innerHeight)); setFrac(f); });
+  const end=()=>{ if(!state.dragging) return; state.dragging=false; sheet.classList.remove('dragging');
+    if(moved<6){ setFrac(state.frac>0.45?PEEK:FULL); }
+    else { let near=DETENTS[0]; DETENTS.forEach(d=>{ if(Math.abs(d-state.frac)<Math.abs(near-state.frac)) near=d; }); setFrac(near); }
+    renderPane();
+  };
+  grab.addEventListener('pointerup',end); grab.addEventListener('pointercancel',end);
+})();
+
+/* ===== BOOT ===== */
+document.getElementById('locBtn').onclick=toggleNear;
+setFrac(state.frac);
+renderPane();
+function whenLeaflet(){ if(window.L){ initMap(); } else { setTimeout(whenLeaflet,150); } }
+whenLeaflet();
+</script>
+</body>
+</html>
