@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Office of the Day — Owner Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --paper:#FAF8F3; --card:#FFFFFF; --ink:#2A2520; --muted:#8A8278;
+    --line:#E9E4D9; --matcha:#6B7F5E; --matchaDeep:#4F6147; --matchaSoft:#E8EDE3; --danger:#B4544B;
+    --serif:Georgia,'Times New Roman',serif; --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
+  .wrap{ max-width:1080px; margin:0 auto; padding:24px 20px 80px; }
+  .topbar{ display:flex; align-items:center; justify-content:space-between; }
+  .eyebrow{ font-size:10px; letter-spacing:.3em; text-transform:uppercase; color:var(--matcha); }
+  h1{ font-family:var(--serif); font-weight:400; font-size:30px; margin:2px 0 0; }
+  .who{ font-size:13px; color:var(--muted); }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:7px; border:none; cursor:pointer;
+    border-radius:999px; padding:11px 18px; font-size:14px; font-family:var(--sans); }
+  .btn-primary{ background:var(--matcha); color:#fff; }
+  .btn-ghost{ background:var(--matchaSoft); color:var(--matchaDeep); }
+  .btn-danger{ background:transparent; color:var(--danger); border:1px solid var(--line); }
+  .btn-block{ width:100%; }
+  .panel{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:20px; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:22px; }
+  @media (max-width:840px){ .grid{ grid-template-columns:1fr; } }
+  h2{ font-family:var(--serif); font-weight:400; font-size:20px; margin:0 0 14px; }
+  label{ display:block; font-size:12px; letter-spacing:.04em; color:var(--muted); margin:12px 0 5px; text-transform:uppercase; }
+  input,textarea{ width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px; font-family:var(--sans); color:var(--ink); background:#fff; outline:none; }
+  input:focus,textarea:focus{ border-color:var(--matcha); }
+  textarea{ min-height:74px; resize:vertical; }
+  .two{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .minimap{ height:230px; border-radius:12px; overflow:hidden; border:1px solid var(--line); margin-top:6px; }
+  .hint{ font-size:12px; color:var(--muted); margin-top:6px; }
+  .count{ font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); }
+  table{ width:100%; border-collapse:collapse; margin-top:10px; }
+  th,td{ text-align:left; font-size:13px; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .tname{ font-family:var(--serif); font-size:15px; }
+  .tactions{ display:flex; gap:6px; white-space:nowrap; }
+  .chip{ display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--matchaSoft); color:var(--matchaDeep); }
+  .ok{ color:var(--matchaDeep); font-size:13px; margin-top:8px; }
+  .err{ color:var(--danger); font-size:13px; margin-top:8px; }
+  .mono{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .hide{ display:none !important; }
+  /* PIN gate */
+  .gate{ min-height:100vh; display:grid; place-items:center; padding:20px; }
+  .gatecard{ width:100%; max-width:360px; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:30px; text-align:center; }
+  .pinbox{ letter-spacing:.5em; text-align:center; font-size:24px; padding:14px; }
+  .notice{ background:#FBF1EF; border:1px solid #ECD9D6; color:#8a4a43; font-size:12px; padding:10px 12px; border-radius:10px; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<!-- PIN GATE -->
+<div id="gate" class="gate">
+  <div class="gatecard">
+    <div class="eyebrow">Owner Dashboard</div>
+    <h1 style="font-size:24px">Office of the Day</h1>
+    <p class="hint" style="margin-top:10px">Enter your PIN to manage cafés.</p>
+    <input id="pin" class="pinbox" type="password" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="••••••" />
+    <button class="btn btn-primary btn-block" id="unlockBtn" style="margin-top:14px">Unlock</button>
+    <div id="pinMsg"></div>
+    <div id="cfgNotice" class="notice hide">This dashboard isn’t configured yet. Add your Supabase URL and key at the top of the file.</div>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="app" class="wrap hide">
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Owner Dashboard</div>
+      <h1>Office of the Day</h1>
+    </div>
+    <div style="text-align:right">
+      <div class="who">Unlocked</div>
+      <button class="btn btn-ghost" id="lockBtn" style="margin-top:6px">Lock</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- form -->
+    <div class="panel">
+      <h2 id="formTitle">Add a café</h2>
+      <label>Café name</label>
+      <input id="f_name" placeholder="e.g. Paper Plane Coffee Co." />
+      <div class="two">
+        <div><label>Town / neighborhood</label><input id="f_hood" placeholder="Montclair, NJ" /></div>
+        <div><label>Type</label><input id="f_vibe" placeholder="Indie Coffee" /></div>
+      </div>
+      <label>Address</label>
+      <input id="f_addr" placeholder="61 N Fullerton Ave, Montclair, NJ" />
+      <button class="btn btn-ghost" id="geoBtn" style="margin-top:8px">Find on map</button>
+      <div class="minimap" id="minimap"></div>
+      <div class="hint">Click “Find on map”, then drag the pin to fine-tune. Or click the map to drop it.</div>
+      <div class="two">
+        <div><label>Latitude</label><input id="f_lat" placeholder="40.8230" /></div>
+        <div><label>Longitude</label><input id="f_lng" placeholder="-74.2110" /></div>
+      </div>
+      <div class="two">
+        <div><label>Hours</label><input id="f_hours" placeholder="7am – 6pm" /></div>
+        <div><label>Rating (1–5)</label><input id="f_rating" type="number" min="1" max="5" step="0.1" placeholder="4.8" /></div>
+      </div>
+      <label>Instagram post URL</label>
+      <input id="f_ig" placeholder="https://www.instagram.com/reel/XXXXXXXX/" />
+      <label>Short note / review</label>
+      <textarea id="f_note" placeholder="A sentence or two in your voice…"></textarea>
+      <div style="display:flex; gap:10px; margin-top:16px">
+        <button class="btn btn-primary btn-block" id="saveBtn">Add café</button>
+        <button class="btn btn-ghost" id="resetBtn">Clear</button>
+      </div>
+      <div id="formMsg"></div>
+    </div>
+
+    <!-- list -->
+    <div class="panel">
+      <div style="display:flex; align-items:center; justify-content:space-between">
+        <h2 style="margin:0">Cafés <span class="count" id="cafeCount"></span></h2>
+        <button class="btn btn-ghost" id="reloadBtn">Refresh</button>
+      </div>
+      <p class="hint" style="margin-top:6px">Changes save straight to the live site — no publishing step.</p>
+      <div style="max-height:520px; overflow:auto; margin-top:6px">
+        <table>
+          <thead><tr><th>Name</th><th>Town</th><th>Type</th><th></th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ===== CONFIG ===== */
+const SUPABASE_URL  = 'https://ckbpzdcusxdhnizhdgnh.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYnB6ZGN1c3hkaG5pemhkZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODQ3OTAsImV4cCI6MjA5ODA2MDc5MH0.OxLNjkKS6RkC4ZkD2ld2gU6SH05un0UNjHvRyNYM4gY';
+
+const $ = (id)=>document.getElementById(id);
+const configured = !SUPABASE_URL.includes('YOUR-PROJECT');
+let db=null, cafes=[], editId=null, amap=null, amarker=null, miniReady=false;
+let PIN = sessionStorage.getItem('ootd_pin') || null;
+
+if(configured){ db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON); }
+else { $('cfgNotice').classList.remove('hide'); }
+
+/* ---- PIN gate ---- */
+async function init(){
+  if(!configured) return;
+  if(PIN && await checkPin(PIN)) showApp(); else showGate();
+}
+async function checkPin(pin){
+  const { data, error } = await db.rpc('verify_pin', { pin });
+  return !error && data === true;
+}
+function showGate(){ $('gate').classList.remove('hide'); $('app').classList.add('hide'); $('pin').focus?.(); }
+function showApp(){
+  $('gate').classList.add('hide'); $('app').classList.remove('hide');
+  whenL(()=>{ if(!miniReady){ initMini(); miniReady=true; } setTimeout(()=>amap&&amap.invalidateSize(),200); });
+  loadCafes();
+}
+async function unlock(){
+  const pin = $('pin').value.trim();
+  if(!pin){ msg('pinMsg','Enter your PIN.','err'); return; }
+  msg('pinMsg','Checking…','');
+  if(await checkPin(pin)){ PIN=pin; sessionStorage.setItem('ootd_pin', pin); msg('pinMsg','',''); $('pin').value=''; showApp(); }
+  else msg('pinMsg','That PIN didn’t work.','err');
+}
+function lock(){ PIN=null; sessionStorage.removeItem('ootd_pin'); showGate(); }
+
+/* ---- data ---- */
+async function loadCafes(){
+  const { data, error } = await db.from('cafes').select('*').order('name',{ascending:true});
+  if(error){ msg('formMsg','Could not load cafés: '+error.message,'err'); return; }
+  cafes = data||[]; renderTable();
+}
+function argsFromForm(){
+  return {
+    pin: PIN,
+    p_name:$('f_name').value.trim(),
+    p_neighborhood:$('f_hood').value.trim(),
+    p_vibe:$('f_vibe').value.trim()||'Café',
+    p_address:$('f_addr').value.trim(),
+    p_lat:parseFloat($('f_lat').value), p_lng:parseFloat($('f_lng').value),
+    p_rating:$('f_rating').value?Math.min(5,Math.max(1,parseFloat($('f_rating').value))):4.7,
+    p_hours:$('f_hours').value.trim(),
+    p_instagram_url:$('f_ig').value.trim(),
+    p_note:$('f_note').value.trim()
+  };
+}
+async function save(){
+  const a = argsFromForm();
+  if(!a.p_name){ msg('formMsg','Café name is required.','err'); return; }
+  if(isNaN(a.p_lat)||isNaN(a.p_lng)){ msg('formMsg','Place the pin on the map (or enter lat/lng).','err'); return; }
+  if(!a.p_instagram_url){ msg('formMsg','Add the Instagram post URL.','err'); return; }
+  msg('formMsg','Saving…','');
+  let error;
+  if(editId!=null){ a.p_id=editId; ({ error } = await db.rpc('update_cafe', a)); }
+  else { ({ error } = await db.rpc('add_cafe', a)); }
+  if(error){ handleWriteError(error); return; }
+  msg('formMsg', editId!=null ? 'Café updated — live now.' : 'Café added — live now.', 'ok');
+  clearForm(); loadCafes();
+}
+async function delCafe(id){
+  const c = cafes.find(x=>x.id===id);
+  if(!confirm('Remove “'+(c?c.name:'this café')+'”? This updates the live site.')) return;
+  const { error } = await db.rpc('delete_cafe', { pin:PIN, p_id:id });
+  if(error){ handleWriteError(error); return; }
+  loadCafes();
+}
+function handleWriteError(error){
+  if((error.message||'').includes('Invalid PIN')){ msg('formMsg','Your PIN is no longer valid — please unlock again.','err'); lock(); }
+  else msg('formMsg','Save failed: '+error.message,'err');
+}
+function editCafe(id){
+  const c = cafes.find(x=>x.id===id); if(!c) return;
+  editId=id;
+  $('f_name').value=c.name||''; $('f_hood').value=c.neighborhood||''; $('f_vibe').value=c.vibe||'';
+  $('f_addr').value=c.address||''; $('f_lat').value=c.lat??''; $('f_lng').value=c.lng??'';
+  $('f_hours').value=c.hours||''; $('f_rating').value=c.rating??''; $('f_ig').value=c.instagram_url||''; $('f_note').value=c.note||'';
+  $('formTitle').textContent='Edit café'; $('saveBtn').textContent='Update café';
+  if(!isNaN(+c.lat)&&!isNaN(+c.lng)) setMarker(+c.lat,+c.lng);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function clearForm(){
+  ['f_name','f_hood','f_vibe','f_addr','f_lat','f_lng','f_hours','f_rating','f_ig','f_note'].forEach(i=>$(i).value='');
+  editId=null; $('formTitle').textContent='Add a café'; $('saveBtn').textContent='Add café'; msg('formMsg','','');
+  if(amarker&&amap){ amap.removeLayer(amarker); amarker=null; }
+}
+function renderTable(){
+  $('cafeCount').textContent='· '+cafes.length;
+  const rows = cafes.map(c=>`<tr>
+    <td><div class="tname">${esc(c.name)}</div></td>
+    <td>${esc(c.neighborhood||'')}</td>
+    <td><span class="chip">${esc(c.vibe||'Café')}</span></td>
+    <td><div class="tactions">
+      <button class="btn btn-ghost" style="padding:6px 12px" onclick="editCafe(${c.id})">Edit</button>
+      <button class="btn btn-danger" style="padding:6px 12px" onclick="delCafe(${c.id})">Delete</button>
+    </div></td></tr>`).join('');
+  $('tbody').innerHTML = rows || `<tr><td colspan="4" style="color:var(--muted);padding:18px 8px">No cafés yet — add your first one.</td></tr>`;
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function msg(el,t,cls){ const e=$(el); e.textContent=t; e.className=cls||''; }
+
+/* ---- mini map + geocode ---- */
+function whenL(cb){ if(window.L) cb(); else setTimeout(()=>whenL(cb),150); }
+function initMini(){
+  amap = L.map('minimap',{ zoomControl:true, attributionControl:false }).setView([40.82,-74.10],9);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{ subdomains:'abcd', maxZoom:19 }).addTo(amap);
+  amap.on('click',(e)=> setMarker(e.latlng.lat, e.latlng.lng));
+}
+function setMarker(lat,lng){
+  $('f_lat').value=(+lat).toFixed(5); $('f_lng').value=(+lng).toFixed(5);
+  if(!amap) return;
+  if(amarker) amarker.setLatLng([lat,lng]);
+  else { amarker=L.marker([lat,lng],{draggable:true}).addTo(amap);
+    amarker.on('dragend',()=>{ const p=amarker.getLatLng(); $('f_lat').value=p.lat.toFixed(5); $('f_lng').value=p.lng.toFixed(5); }); }
+  amap.setView([lat,lng],15);
+}
+function geocode(){
+  const q=$('f_addr').value.trim();
+  if(!q){ msg('formMsg','Enter an address first.','err'); return; }
+  msg('formMsg','Looking up address…','');
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q))
+    .then(r=>r.json()).then(d=>{
+      if(d&&d.length){ setMarker(+d[0].lat,+d[0].lon); msg('formMsg','Pin placed — drag to fine-tune.','ok'); }
+      else msg('formMsg','Couldn’t find that address. Click the map to place the pin.','err');
+    }).catch(()=>msg('formMsg','Lookup failed. Click the map to place the pin.','err'));
+}
+
+/* ---- wire ---- */
+$('unlockBtn').onclick=unlock;
+$('pin').addEventListener('keydown',e=>{ if(e.key==='Enter') unlock(); });
+$('lockBtn').onclick=lock;
+$('geoBtn').onclick=geocode;
+$('saveBtn').onclick=save;
+$('resetBtn').onclick=clearForm;
+$('reloadBtn').onclick=loadCafes;
+init();
+</script>
+</body>
+</html>
