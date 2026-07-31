@@ -130,6 +130,33 @@
       </div>
     </div>
   </div>
+
+  <!-- insights -->
+  <div class="panel" style="margin-top:22px">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
+      <h2 style="margin:0">Insights <span class="count" id="insTotals"></span></h2>
+      <button class="btn btn-ghost" id="insRefreshBtn">Refresh</button>
+    </div>
+    <p class="hint" style="margin-top:6px">Aggregate counts only — no cookies, no visitor details. Just what was tapped, and when.</p>
+    <div id="insTypes" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px"></div>
+    <div class="grid" style="margin-top:8px">
+      <div>
+        <h2 style="font-size:16px; margin:14px 0 0">Most-opened cafés</h2>
+        <table>
+          <thead><tr><th>Café</th><th style="text-align:right">Opens</th></tr></thead>
+          <tbody id="insCafes"></tbody>
+        </table>
+      </div>
+      <div>
+        <h2 style="font-size:16px; margin:14px 0 0">Most directions taps</h2>
+        <table>
+          <thead><tr><th>Café</th><th style="text-align:right">Taps</th></tr></thead>
+          <tbody id="insDirs"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="insMsg"></div>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -161,6 +188,7 @@ function showApp(){
   $('gate').classList.add('hide'); $('app').classList.remove('hide');
   whenL(()=>{ if(!miniReady){ initMini(); miniReady=true; } setTimeout(()=>amap&&amap.invalidateSize(),200); });
   loadCafes();
+  loadInsights();
 }
 async function unlock(){
   const pin = $('pin').value.trim();
@@ -242,6 +270,34 @@ function renderTable(){
     </div></td></tr>`).join('');
   $('tbody').innerHTML = rows || `<tr><td colspan="4" style="color:var(--muted);padding:18px 8px">No cafés yet — add your first one.</td></tr>`;
 }
+/* ---- insights (aggregate only) ---- */
+const EVENT_LABELS = { pageview:'Page views', cafe_open:'Café opens', directions:'Directions', review:'Review taps', bio_open:'Bio opens' };
+async function loadInsights(){
+  if(!db || !PIN) return;
+  msg('insMsg','Loading…','');
+  const { data, error } = await db.rpc('get_insights', { pin: PIN });
+  if(error){
+    if((error.message||'').includes('Invalid PIN')){ msg('insMsg','Your PIN is no longer valid — please unlock again.','err'); lock(); return; }
+    msg('insMsg','Could not load insights: '+error.message,'err'); return;
+  }
+  msg('insMsg','','');
+  renderInsights(data||{});
+}
+function renderInsights(d){
+  $('insTotals').textContent = '· '+(d.total_events||0)+' total · '+(d.last7||0)+' in last 7 days';
+  const by = d.by_type||{};
+  const keys = Object.keys(EVENT_LABELS).concat(Object.keys(by).filter(k=>!(k in EVENT_LABELS)));
+  $('insTypes').innerHTML = keys.map(k=>`<span class="chip">${esc(EVENT_LABELS[k]||k)} · ${by[k]||0}</span>`).join('');
+  $('insCafes').innerHTML = insRows(d.top_cafes,'opens','No café opens logged yet.');
+  $('insDirs').innerHTML  = insRows(d.top_directions,'taps','No directions taps logged yet.');
+}
+function insRows(list, field, empty){
+  if(!Array.isArray(list) || !list.length) return `<tr><td colspan="2" style="color:var(--muted);padding:14px 8px">${empty}</td></tr>`;
+  return list.map(r=>`<tr>
+    <td><div class="tname">${esc(r.cafe_name||'—')}</div></td>
+    <td style="text-align:right" class="mono">${Number(r[field])||0}</td></tr>`).join('');
+}
+
 function esc(s){ return String(s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function msg(el,t,cls){ const e=$(el); e.textContent=t; e.className=cls||''; }
 
@@ -279,6 +335,7 @@ $('geoBtn').onclick=geocode;
 $('saveBtn').onclick=save;
 $('resetBtn').onclick=clearForm;
 $('reloadBtn').onclick=loadCafes;
+$('insRefreshBtn').onclick=loadInsights;
 init();
 </script>
 </body>

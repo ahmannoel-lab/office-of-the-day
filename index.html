@@ -323,6 +323,7 @@ function openPlace(c){
   state.selected = same ? null : c;
   drawMarkers();
   if(state.selected){
+    logEvent('cafe_open', c);
     setFrac(Math.max(state.frac, 0.6));
     if(map) map.flyTo([c.lat,c.lng], Math.max(13, map.getZoom()), { duration:0.6 });
   }
@@ -479,7 +480,7 @@ document.getElementById('locBtn').onclick=toggleNear;
 
 /* bio / intro card */
 const bioEl=document.getElementById('bio');
-function openBio(){ bioEl.classList.add('open'); }
+function openBio(){ bioEl.classList.add('open'); logEvent('bio_open'); }
 function closeBio(){ bioEl.classList.remove('open'); }
 const plateEl=document.getElementById('plate');
 plateEl.onclick=openBio;
@@ -495,6 +496,24 @@ whenLeaflet();
 /* ===== CONFIG — paste your Supabase project values here ===== */
 const SUPABASE_URL  = 'https://ckbpzdcusxdhnizhdgnh.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYnB6ZGN1c3hkaG5pemhkZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODQ3OTAsImV4cCI6MjA5ODA2MDc5MH0.OxLNjkKS6RkC4ZkD2ld2gU6SH05un0UNjHvRyNYM4gY';
+
+/* ===== ANALYTICS — privacy-light, aggregate only (no cookies, no personal data) ===== */
+function logEvent(type, cafe){
+  if(SUPABASE_URL.includes('YOUR-PROJECT')) return;
+  try{
+    fetch(SUPABASE_URL+'/rest/v1/rpc/log_event', {
+      method:'POST', keepalive:true,
+      headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON, Authorization:'Bearer '+SUPABASE_ANON },
+      body: JSON.stringify({ p_type:type, p_cafe_id: cafe?cafe.id:null, p_cafe_name: cafe?cafe.name:null })
+    }).catch(()=>{});
+  }catch(_){}
+}
+/* delegated — survives re-renders of the detail card */
+document.addEventListener('click', function(e){
+  if(!state.selected) return;
+  if(e.target.closest('.btn-primary')) logEvent('directions', state.selected);
+  else if(e.target.closest('.btn-dark')) logEvent('review', state.selected);
+}, true);
 
 function mapRow(c){ return {
   id:c.id, name:c.name||'Untitled café', neighborhood:c.neighborhood||'', address:c.address||'',
@@ -512,6 +531,7 @@ function loadData(){
   }).then(r=>r.ok?r.json():null).then(d=>{ if(Array.isArray(d)) applyData(d); }).catch(()=>{});
 }
 loadData();
+logEvent('pageview');
 </script>
 </body>
 </html>
