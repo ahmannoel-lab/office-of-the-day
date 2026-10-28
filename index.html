@@ -19,7 +19,10 @@
 
   /* floating chrome */
   .chrome{ position:absolute; top:0; left:0; right:0; padding:16px; z-index:10;
-    display:flex; align-items:flex-start; justify-content:space-between; pointer-events:none; }
+    display:flex; align-items:flex-start; justify-content:space-between; pointer-events:none;
+    transition:opacity .3s ease; }
+  .chrome.faded{ opacity:0; }
+  .chrome.faded > *{ pointer-events:none; }
   .plate{ pointer-events:auto; background:rgba(255,255,255,.92); border:1px solid var(--line);
     border-radius:16px; padding:10px 16px; backdrop-filter:blur(8px); }
   .plate .eyebrow{ font-size:9px; letter-spacing:.3em; text-transform:uppercase; color:var(--matcha); }
@@ -56,19 +59,36 @@
     background:var(--ink); color:var(--paper); border-radius:999px; padding:12px; font-size:14px; text-decoration:none; }
   .bio-ig svg{ width:16px; height:16px; }
 
-  /* bottom sheet */
-  .sheet{ position:absolute; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom));
-    z-index:20; height:34vh; overflow:hidden;
-    background:var(--paper); border-radius:26px; box-shadow:0 18px 50px rgba(42,37,32,.22);
-    display:flex; flex-direction:column; transition:height .42s cubic-bezier(.4,0,.2,1); }
-  .sheet.dragging{ transition:none; }
+  /* bottom sheet
+     The sheet never animates height. Its frame is as tall as the FULL detent and the body slides
+     inside it with translate3d. The frame clips the bottom edge (with the rounded corners), the
+     shadow is drawn by a separate layer that moves with the body, and a small fixed "foot" draws
+     the shadow under the bottom edge. Sizes are set in px from JS (see SHEET). */
+  :root{ --sheet-bottom:calc(12px + env(safe-area-inset-bottom)); --sheetH:34vh; --sheetBodyH:34vh; }
+  .sheet, .sheetShadowFrame{ position:absolute; left:12px; right:12px; bottom:var(--sheet-bottom);
+    height:var(--sheetH); pointer-events:none; }
+  .sheet{ z-index:20; clip-path:inset(-100vh 0 0 0 round 0 0 26px 26px); }
+  .sheetShadowFrame{ z-index:19; clip-path:inset(-100vh -80px 0 -80px); }
+  .sheetBody, .sheetShadow{ position:absolute; left:0; right:0; top:0; height:var(--sheetBodyH);
+    border-radius:26px; transform:translate3d(0,0,0); will-change:transform;
+    transition:transform .42s cubic-bezier(.4,0,.2,1); }
+  .sheetBody{ pointer-events:auto; overflow:hidden; background:var(--paper);
+    display:flex; flex-direction:column; }
+  .sheetShadow{ box-shadow:0 18px 50px rgba(42,37,32,.22); }
+  .sheetFoot{ position:absolute; left:12px; right:12px; bottom:var(--sheet-bottom); height:26px; z-index:19;
+    border-radius:0 0 26px 26px; box-shadow:0 18px 50px rgba(42,37,32,.22); pointer-events:none; }
+  .sheetBody.dragging, .sheetShadow.dragging, .sheetBody.instant, .sheetShadow.instant{ transition:none; }
   .grab{ padding:10px 0 8px; flex:none; cursor:grab; touch-action:none; user-select:none; }
+  .row-top, .search{ touch-action:none; }
+  .search input{ touch-action:manipulation; }
+  .chips{ touch-action:pan-x; }
   .grab .bar{ width:40px; height:5px; border-radius:999px; background:var(--line); margin:0 auto; }
   .pane{ display:flex; flex-direction:column; min-height:0; flex:1; }
   .pad{ padding:0 20px; flex:none; }
   .row-top{ display:flex; align-items:baseline; justify-content:space-between; }
   .count{ font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
   .hint{ font-size:12px; color:var(--matcha); }
+  .hint[hidden]{ display:none; }
 
   .search{ position:relative; margin-top:12px; }
   .search svg{ position:absolute; left:14px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--muted); }
@@ -81,7 +101,8 @@
     border-radius:999px; padding:6px 14px; font-size:12px; cursor:pointer; }
   .chip.on{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
 
-  .list{ padding:0 12px 32px; overflow-y:auto; flex:1; border-top:1px solid var(--line); }
+  .list{ padding:0 12px 32px; overflow-y:auto; flex:1; min-height:0; border-top:1px solid var(--line);
+    overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
   .item{ width:100%; text-align:left; background:none; border:none;
     display:flex; align-items:center; gap:12px; padding:12px 8px; cursor:pointer; }
   .mono{ flex:none; width:44px; height:44px; border-radius:12px; display:grid; place-items:center;
@@ -102,7 +123,7 @@
   .detail .metaRow{ margin-top:0; }
   .detail .note{ font-size:14px; line-height:1.55; margin:12px 0 0; }
   .detail .addr{ font-size:12px; color:var(--muted); margin:8px 0 12px; }
-  .detail .embedWrap{ border:1px solid var(--line); border-radius:16px; overflow:hidden; background:#fff; }
+  .detail .embedWrap{ border:1px solid var(--line); border-radius:16px; overflow:hidden; background:#fff; min-height:460px; }
   .detail .cta{ margin-top:12px; }
   .btnRow{ display:flex; gap:10px; margin-top:14px; }
   .btn{ flex:1; display:inline-flex; align-items:center; justify-content:center; gap:7px;
@@ -148,9 +169,13 @@
     </button>
   </div>
 
+  <div class="sheetFoot" aria-hidden="true"></div>
+  <div class="sheetShadowFrame" aria-hidden="true"><div class="sheetShadow" id="sheetShadow"></div></div>
   <section class="sheet" id="sheet">
-    <div class="grab" id="grab"><div class="bar"></div></div>
-    <div id="pane" class="pane"></div>
+    <div class="sheetBody" id="sheetBody">
+      <div class="grab" id="grab"><div class="bar"></div></div>
+      <div id="pane" class="pane"></div>
+    </div>
   </section>
 
   <!-- BIO / INTRO CARD -->
@@ -177,6 +202,11 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+/* ===== CONFIG — paste your Supabase project values here ===== */
+const CARTO_KEY     = 'cb1_4wxe_1_688d937cc982990fc5c51d43'; // CARTO basemaps key (public by design)
+const SUPABASE_URL  = 'https://ckbpzdcusxdhnizhdgnh.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYnB6ZGN1c3hkaG5pemhkZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODQ3OTAsImV4cCI6MjA5ODA2MDc5MH0.OxLNjkKS6RkC4ZkD2ld2gU6SH05un0UNjHvRyNYM4gY';
+
 /* ===== DATA (inline = offline fallback; live data loads from cafes.json) ===== */
 let CAFES = [
   { id: 1, name: "Calandra's Bakery", neighborhood: "Fairfield, NJ", address: "244 US Highway 46 E, Fairfield, NJ", lat: 40.8567, lng: -74.2780, rating: 4.8, vibe: "Bakery", note: "A Fairfield institution. Oven-fresh pastries, a corner seat in the light, and the kind of neighborhood ease that makes you stay all morning.", hours: "6:30am – 5pm", instagramUrl: "https://www.instagram.com/reel/DYqCukZpsiL/" },
@@ -258,11 +288,15 @@ const stars = (v) => {
   s+=`<span class="muted" style="font-size:12px;margin-left:6px">${v.toFixed(1)}</span></span>`; return s;
 };
 const monogram = (name) => {
-  const p = name.replace(/[^a-zA-Z ]/g,'').trim().split(/\s+/);
+  const p = String(name||'').replace(/[^a-zA-Z ]/g,'').trim().split(/\s+/);
   return (p.length===1 ? p[0].slice(0,2) : p[0][0]+p[1][0]).toUpperCase();
 };
 const haversine=(a,b,c,d)=>{const R=3959,r=x=>x*Math.PI/180;const dLat=r(c-a),dLng=r(d-b);
   const h=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
+
+/* escape anything from the database before it goes into HTML */
+const esc = (v) => String(v==null?'':v).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const safeUrl = (u) => /^https?:\/\//i.test(String(u||'').trim()) ? String(u).trim() : '#';
 
 /* ===== STATE ===== */
 const state = { query:'', hood:'All', selected:null, origin:null, geo:'idle', view:'guide', frac:0.40, dragging:false };
@@ -286,7 +320,7 @@ const distFor=(c)=>{ const m=results().find(r=>r.id===c.id); return m&&m.dist!=n
 let map, markerLayer, originMarker;
 function initMap(){
   map = L.map('map',{ zoomControl:false, attributionControl:true }).setView([40.82,-74.10],10);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key='+CARTO_KEY,
     { subdomains:'abcd', maxZoom:19, attribution:'© OpenStreetMap © CARTO' }).addTo(map);
   map.on('click',()=>{ if(state.selected){ state.selected=null; drawMarkers(); renderPaneListOnly(); } });
   document.getElementById('loadingMap').style.display='none';
@@ -328,16 +362,22 @@ function openPlace(c){
   const same = state.selected && state.selected.id===c.id;
   state.selected = same ? null : c;
   drawMarkers();
+  let settled = null;
   if(state.selected){
     logEvent('cafe_open', c);
-    setFrac(Math.max(state.frac, 0.6));
+    settled = setFrac(FULL);
     if(map) map.flyTo([c.lat,c.lng], Math.max(13, map.getZoom()), { duration:0.6 });
   }
   renderPaneListOnly();
-  if(state.selected){
-    requestAnimationFrame(()=>{
-      const el=document.querySelector('.cafe.open');
-      if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
+  if(settled){
+    // wait for the sheet to finish moving, then scroll only the list (never the page)
+    const id = c.id;
+    settled.then(()=>{
+      if(!state.selected || state.selected.id!==id) return;
+      const list=document.getElementById('list'), el=document.querySelector('.cafe.open');
+      if(!list || !el) return;
+      const top = list.scrollTop + (el.getBoundingClientRect().top - list.getBoundingClientRect().top) - 4;
+      list.scrollTo({ top:Math.max(0,top), behavior:'smooth' });
     });
   }
 }
@@ -364,26 +404,27 @@ function renderChrome(){
   const btn=document.getElementById('locBtn');
   btn.classList.toggle('on', state.geo==='on');
 }
-function setFrac(f){
-  state.frac=f;
-  document.getElementById('sheet').style.height=(f*100)+'vh';
-  const ch=document.querySelector('.chrome');
-  if(ch){ const hide=f>0.7; ch.style.transition='opacity .3s ease'; ch.style.opacity=hide?'0':'1'; ch.style.pointerEvents=hide?'none':''; }
+// move the sheet to a detent; returns a promise that resolves when it has settled
+function setFrac(f, opts){ return SHEET.to(f, opts); }
+function updateHint(){
+  const h=document.getElementById('swipeHint');
+  if(h) h.hidden = !(state.frac<=PEEK+0.02);
 }
 
 function detailHTML(c, d){
   const dir = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(c.address);
+  const ig = safeUrl(c.instagramUrl);
   return `<div class="detail">
-    <div class="metaRow">${stars(c.rating)}<span class="muted" style="font-size:14px">${c.hours}</span></div>
-    <p class="note">${c.note}</p>
-    <p class="addr">${c.address}</p>
+    <div class="metaRow">${stars(+c.rating||0)}<span class="muted" style="font-size:14px">${esc(c.hours)}</span></div>
+    <p class="note">${esc(c.note)}</p>
+    <p class="addr">${esc(c.address)}</p>
     <div class="embedWrap">
-      <blockquote class="instagram-media" data-instgrm-permalink="${c.instagramUrl}" data-instgrm-version="14"
+      <blockquote class="instagram-media" data-instgrm-permalink="${esc(ig)}" data-instgrm-version="14"
         style="background:#FFF;border:0;margin:0;padding:0;width:100%;min-width:unset"></blockquote>
     </div>
     <div class="btnRow">
-      <a class="btn btn-primary" href="${dir}" target="_blank" rel="noopener noreferrer">${svg(ICON.nav)} Directions</a>
-      <a class="btn btn-dark" href="${c.instagramUrl}" target="_blank" rel="noopener noreferrer">${svg(ICON.arrow)} Review</a>
+      <a class="btn btn-primary" href="${esc(dir)}" target="_blank" rel="noopener noreferrer">${svg(ICON.nav)} Directions</a>
+      <a class="btn btn-dark" href="${esc(ig)}" target="_blank" rel="noopener noreferrer">${svg(ICON.arrow)} Review</a>
     </div>
   </div>`;
 }
@@ -396,15 +437,15 @@ function listHTML(){
   return list.map(c=>{
     const d=distFor(c);
     const open = state.selected && state.selected.id===c.id;
-    return `<div class="cafe ${open?'open':''}" data-id="${c.id}">
-      <button class="item" data-id="${c.id}">
-        <div class="mono">${monogram(c.name)}</div>
+    return `<div class="cafe ${open?'open':''}" data-id="${esc(c.id)}">
+      <button class="item" data-id="${esc(c.id)}">
+        <div class="mono">${esc(monogram(c.name))}</div>
         <div class="meta">
           <div style="display:flex;justify-content:space-between;gap:8px">
-            <span class="name">${c.name}</span>
+            <span class="name">${esc(c.name)}</span>
             ${d!=null?`<span class="dist">${d.toFixed(1)} mi</span>`:''}
           </div>
-          <div class="sub">${c.vibe} · ${c.neighborhood}</div>
+          <div class="sub">${esc(c.vibe)} · ${esc(c.neighborhood)}</div>
         </div>
         ${svg(ICON.chevDown,'chev')}
       </button>
@@ -419,11 +460,11 @@ function renderPane(){
     <div class="pad">
       <div class="row-top">
         <span class="count">${results().length} ${results().length===1?'café':'cafés'} · North NJ &amp; NYC</span>
-        ${state.frac<=PEEK+0.02?'<span class="hint">Swipe up ↑</span>':''}
+        <span class="hint" id="swipeHint"${state.frac<=PEEK+0.02?'':' hidden'}>Swipe up ↑</span>
       </div>
-      <div class="search">${svg(ICON.search)}<input id="searchInput" placeholder="Search a café or town" value="${state.query.replace(/"/g,'&quot;')}"/></div>
+      <div class="search">${svg(ICON.search)}<input id="searchInput" placeholder="Search a café or town" value="${esc(state.query)}"/></div>
       <div class="chips" id="chips">
-        ${hoods.map(h=>`<button class="chip ${state.hood===h?'on':''}" data-hood="${h}">${h}</button>`).join('')}
+        ${hoods.map(h=>`<button class="chip ${state.hood===h?'on':''}" data-hood="${esc(h)}">${esc(h)}</button>`).join('')}
       </div>
     </div>
     <div class="list" id="list">${listHTML()}</div>`;
@@ -464,21 +505,203 @@ function processEmbeds(){
   let n=0; const t=setInterval(()=>{ n++; if(run()||n>12){ igLoaded=true; clearInterval(t);} },400);
 }
 
-/* ===== SHEET DRAG ===== */
-(function(){
-  const grab=document.getElementById('grab'), sheet=document.getElementById('sheet');
-  let startY=0, startFrac=0, moved=0;
-  grab.addEventListener('pointerdown',(e)=>{ startY=e.clientY; startFrac=state.frac; moved=0;
-    state.dragging=true; sheet.classList.add('dragging'); try{grab.setPointerCapture(e.pointerId);}catch(_){} });
-  grab.addEventListener('pointermove',(e)=>{ if(!state.dragging) return;
-    const dy=startY-e.clientY; moved=Math.max(moved,Math.abs(dy));
-    const f=Math.min(FULL,Math.max(0.10,startFrac+dy/window.innerHeight)); setFrac(f); });
-  const end=()=>{ if(!state.dragging) return; state.dragging=false; sheet.classList.remove('dragging');
-    if(moved<6){ setFrac(state.frac>0.45?PEEK:FULL); }
-    else { let near=DETENTS[0]; DETENTS.forEach(d=>{ if(Math.abs(d-state.frac)<Math.abs(near-state.frac)) near=d; }); setFrac(near); }
-    renderPane();
+/* ===== SHEET (transform-based, Apple Maps style) =====
+   Visible height at a detent = frac * viewport height (same math as before, now in px).
+   The body is always the FULL detent tall (+ a little overscan for rubber-banding) and is moved
+   with translate3d. Its bottom padding is set so the list always ends at the visible bottom edge. */
+const SHEET = (function(){
+  const root=document.documentElement;
+  const frame=document.getElementById('sheet'), body=document.getElementById('sheetBody');
+  const shadow=document.getElementById('sheetShadow');
+  const OVER=90;                       // extra body height below the frame, used while rubber-banding
+  let vh=0, Hfull=0, bodyH=0, curH=0, hideH=-1, settleTimer=0, settleResolve=null, settleTarget=null;
+
+  function measure(){
+    vh = window.innerHeight || document.documentElement.clientHeight;
+    const r = frame.getBoundingClientRect();
+    const bottomGap = Math.max(0, vh - r.bottom);                 // 12px + safe-area inset
+    Hfull = Math.round(Math.min(FULL*vh, vh - bottomGap - 8));
+    bodyH = Hfull + OVER;
+    root.style.setProperty('--sheetH', Hfull+'px');
+    root.style.setProperty('--sheetBodyH', bodyH+'px');
+  }
+  const hFor = (f) => Math.min(Hfull, Math.round(f*vh));
+  const fracFor = (h) => h/vh;
+
+  function apply(h){
+    curH = h;
+    const t = `translate3d(0,${(Hfull-h).toFixed(1)}px,0)`;
+    body.style.transform = t; shadow.style.transform = t;
+  }
+  // bottom padding so the pane (and its list) ends exactly at the visible bottom edge
+  function setHide(h){
+    const v = Math.max(0, Math.round(bodyH - h));
+    if(v===hideH) return; hideH=v; body.style.paddingBottom = v+'px';
+  }
+  function readH(){                      // actual on-screen height, also mid-transition
+    const m = getComputedStyle(body).transform;
+    if(!m || m==='none') return curH;
+    return Hfull - new DOMMatrixReadOnly(m).m42;
+  }
+  function chrome(f){
+    const ch=document.querySelector('.chrome');
+    if(ch) ch.classList.toggle('faded', f>0.7);
+  }
+  function finishSettle(){
+    clearTimeout(settleTimer); settleTimer=0;
+    if(settleTarget!=null) setHide(settleTarget);
+    settleTarget=null;
+    if(map) map.invalidateSize({ pan:false });
+    const r=settleResolve; settleResolve=null; if(r) r();
+  }
+  body.addEventListener('transitionend', (e)=>{ if(e.target===body && e.propertyName==='transform') finishSettle(); });
+
+  // animate (or jump) to a detent fraction; resolves once the sheet has settled
+  function to(f, opts){
+    opts = opts||{};
+    if(settleResolve){ const r=settleResolve; settleResolve=null; r(); }
+    clearTimeout(settleTimer);
+    state.frac = f;
+    const from = readH(), target = hFor(f);
+    chrome(f); updateHint();
+    if(target >= from) setHide(target);          // growing: reveal content right away
+    settleTarget = target;                        // shrinking: trim the list after the move
+    const instant = opts.instant || Math.abs(target-from) < 1;
+    body.classList.toggle('instant', instant); shadow.classList.toggle('instant', instant);
+    apply(target);
+    return new Promise((resolve)=>{
+      settleResolve = resolve;
+      if(instant){ requestAnimationFrame(()=>{ body.classList.remove('instant'); shadow.classList.remove('instant'); finishSettle(); }); }
+      else settleTimer = setTimeout(finishSettle, 520);   // fallback if transitionend never fires
+    });
+  }
+
+  /* ---- dragging ---- */
+  const rubber = (x, d) => d*(1 - 1/(x*0.55/d + 1));     // diminishing pull past an edge
+  let drag=null, raf=0;
+
+  function begin(y, source, extra){
+    if(settleResolve){ const r=settleResolve; settleResolve=null; r(); }
+    clearTimeout(settleTimer); settleTarget=null;
+    const h = readH();
+    body.classList.add('dragging'); shadow.classList.add('dragging');
+    apply(h);
+    setHide(Hfull);                                    // list fills the full height while dragging
+    state.dragging = true;
+    drag = Object.assign({ startY:y, y, startH:h, source, samples:[{t:performance.now(), y}] }, extra||{});
+  }
+  function step(){
+    raf=0; if(!drag) return;
+    const peekH = hFor(PEEK);
+    let h = drag.startH + (drag.startY - drag.y);
+    if(h > Hfull){
+      if(drag.source==='list' && drag.list){         // sheet is full: keep going by scrolling the list
+        drag.list.scrollTop = drag.listTop + (h - Hfull);
+        h = Hfull;
+      } else h = Hfull + rubber(h - Hfull, OVER*0.8);
+    } else if(h < peekH){
+      h = peekH - rubber(peekH - h, peekH*0.45);
+    }
+    apply(h);
+    chrome(fracFor(h));
+  }
+  function move(y){
+    if(!drag) return;
+    drag.y = y;
+    const now = performance.now();
+    drag.samples.push({t:now, y});
+    while(drag.samples.length>2 && now - drag.samples[0].t > 100) drag.samples.shift();
+    if(!raf) raf = requestAnimationFrame(step);
+  }
+  function end(){
+    if(!drag) return;
+    if(raf){ cancelAnimationFrame(raf); raf=0; }
+    step();
+    const d = drag; drag = null; state.dragging = false;
+    body.classList.remove('dragging'); shadow.classList.remove('dragging');
+    const s = d.samples, a = s[0], b = s[s.length-1];
+    const v = (a.y - b.y) / Math.max(1, b.t - a.t);    // px/ms, positive = moving up
+    const recent = performance.now() - b.t < 120;      // a pause before release cancels the flick
+    const h = Math.min(Hfull, curH);
+    const hs = DETENTS.map(hFor);
+    let target;
+    if(recent && Math.abs(v) > 0.5){
+      if(v > 0){ const up = hs.filter(x => x > h + 2); target = up.length ? Math.min(...up) : hs[hs.length-1]; }
+      else     { const dn = hs.filter(x => x < h - 2); target = dn.length ? Math.max(...dn) : hs[0]; }
+    } else {
+      target = hs.reduce((best,x)=> Math.abs(x-h) < Math.abs(best-h) ? x : best, hs[0]);
+    }
+    to(DETENTS[hs.indexOf(target)]);
+  }
+
+  /* header + handle: pointer events (mouse and touch). The search input and chips are excluded. */
+  let pd=null;
+  body.addEventListener('pointerdown', (e)=>{
+    if(e.pointerType==='mouse' && e.button!==0) return;
+    const t = e.target;
+    let source = null;
+    if(t.closest('.grab')) source='handle';
+    else if(t.closest('.row-top, .search') && !t.closest('input, .chips')) source='header';
+    if(!source) return;
+    pd = { id:e.pointerId, y:e.clientY, source, active:false, maxMove:0 };
+    try{ body.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  body.addEventListener('pointermove', (e)=>{
+    if(!pd || e.pointerId!==pd.id) return;
+    pd.maxMove = Math.max(pd.maxMove, Math.abs(e.clientY - pd.y));
+    if(!pd.active && pd.maxMove >= 6){ pd.active=true; begin(pd.y, pd.source); }
+    if(pd.active){ e.preventDefault(); move(e.clientY); }
+  });
+  const pEnd = (e)=>{
+    if(!pd || e.pointerId!==pd.id) return;
+    const p = pd; pd = null;
+    try{ body.releasePointerCapture(e.pointerId); }catch(_){}
+    if(p.active){ end(); return; }
+    if(e.type==='pointerup' && p.source==='handle') to(state.frac > 0.45 ? PEEK : FULL);   // tap: same toggle as before
   };
-  grab.addEventListener('pointerup',end); grab.addEventListener('pointercancel',end);
+  body.addEventListener('pointerup', pEnd);
+  body.addEventListener('pointercancel', pEnd);
+
+  /* list handoff (touch): at the top of the list a downward drag moves the sheet;
+     below FULL an upward drag expands the sheet before the list scrolls. */
+  let td=null;
+  body.addEventListener('touchstart', (e)=>{
+    const list = e.target.closest && e.target.closest('#list');
+    if(!list || e.touches.length!==1){ td=null; return; }
+    td = { y:e.touches[0].clientY, list, decided:false, take:false };
+  }, { passive:true });
+  body.addEventListener('touchmove', (e)=>{
+    if(!td) return;
+    const y = e.touches[0].clientY;
+    if(!td.decided){
+      const dy = y - td.y;
+      if(Math.abs(dy) < 4) return;
+      td.decided = true;
+      td.take = (dy > 0 && td.list.scrollTop <= 0) || (dy < 0 && readH() < Hfull - 1);
+      if(td.take) begin(td.y, 'list', { list:td.list, listTop:td.list.scrollTop });
+    }
+    if(td.take){ if(e.cancelable) e.preventDefault(); move(y); }
+  }, { passive:false });
+  const tEnd = ()=>{ if(td && td.take) end(); td=null; };
+  body.addEventListener('touchend', tEnd);
+  body.addEventListener('touchcancel', tEnd);
+
+  /* keep px sizes in sync with the real viewport (iOS address bar, rotation) */
+  let rz=0;
+  function onResize(){
+    if(rz) return;
+    rz = requestAnimationFrame(()=>{
+      rz=0;
+      if(map) map.invalidateSize({ pan:false });
+      if(state.dragging) return;
+      measure(); hideH=-1; to(state.frac, { instant:true });
+    });
+  }
+  window.addEventListener('resize', onResize);
+  if(window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+
+  measure();
+  return { to, measure };
 })();
 
 /* ===== BOOT ===== */
@@ -494,14 +717,10 @@ plateEl.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.prev
 document.getElementById('bioClose').onclick=closeBio;
 document.getElementById('bioBackdrop').onclick=closeBio;
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeBio(); });
-setFrac(state.frac);
 renderPane();
+setFrac(state.frac, { instant:true });
 function whenLeaflet(){ if(window.L){ initMap(); } else { setTimeout(whenLeaflet,150); } }
 whenLeaflet();
-
-/* ===== CONFIG — paste your Supabase project values here ===== */
-const SUPABASE_URL  = 'https://ckbpzdcusxdhnizhdgnh.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYnB6ZGN1c3hkaG5pemhkZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODQ3OTAsImV4cCI6MjA5ODA2MDc5MH0.OxLNjkKS6RkC4ZkD2ld2gU6SH05un0UNjHvRyNYM4gY';
 
 /* ===== ANALYTICS — privacy-light, aggregate only (no cookies, no personal data) ===== */
 function logEvent(type, cafe){
