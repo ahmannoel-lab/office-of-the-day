@@ -174,6 +174,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ===== CONFIG ===== */
+const CARTO_KEY = 'cb1_4wxe_1_688d937cc982990fc5c51d43'; // CARTO basemaps key (public by design, served to every visitor)
 const SUPABASE_URL  = 'https://ckbpzdcusxdhnizhdgnh.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYnB6ZGN1c3hkaG5pemhkZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODQ3OTAsImV4cCI6MjA5ODA2MDc5MH0.OxLNjkKS6RkC4ZkD2ld2gU6SH05un0UNjHvRyNYM4gY';
 
@@ -315,8 +316,9 @@ function msg(el,t,cls){ const e=$(el); e.textContent=t; e.className=cls||''; }
 /* ---- mini map + geocode ---- */
 function whenL(cb){ if(window.L) cb(); else setTimeout(()=>whenL(cb),150); }
 function initMini(){
-  amap = L.map('minimap',{ zoomControl:true, attributionControl:false }).setView([40.82,-74.10],9);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{ subdomains:'abcd', maxZoom:19 }).addTo(amap);
+  amap = L.map('minimap',{ zoomControl:true, attributionControl:true }).setView([40.82,-74.10],9);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key='+CARTO_KEY,
+    { subdomains:'abcd', maxZoom:19, attribution:'© OpenStreetMap © CARTO' }).addTo(amap);
   amap.on('click',(e)=> setMarker(e.latlng.lat, e.latlng.lng));
 }
 function setMarker(lat,lng){
@@ -327,15 +329,72 @@ function setMarker(lat,lng){
     amarker.on('dragend',()=>{ const p=amarker.getLatLng(); $('f_lat').value=p.lat.toFixed(5); $('f_lng').value=p.lng.toFixed(5); }); }
   amap.setView([lat,lng],15);
 }
-function geocode(){
+/* Address lookup: Nominatim first, Photon as automatic fallback. Both are free and keyless.
+   Results are biased toward North NJ / NYC and anything far outside the region is ignored. */
+const GEO_CENTER = { lat:40.82, lng:-74.10 };            // North NJ / NYC
+const GEO_VIEWBOX = '-75.60,41.40,-73.60,40.20';          // lon1,lat1,lon2,lat2 (bias, not a hard limit)
+const GEO_MAX_KM = 150;
+function geoKm(lat,lng){ const R=6371,r=x=>x*Math.PI/180;
+  const h=Math.sin(r(lat-GEO_CENTER.lat)/2)**2+Math.cos(r(GEO_CENTER.lat))*Math.cos(r(lat))*Math.sin(r(lng-GEO_CENTER.lng)/2)**2;
+  return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h)); }
+// "Ste 137", "Unit 6", "Fl 2", "US Highway 46 E" etc. trip up the geocoders, so a simplified retry drops them.
+function simplifyAddress(q){
+  return q
+    .replace(/,?\s*(?:(?:suite|ste|unit|apt|fl|floor)\b\.?|#)\s*[\w-]+(?=,|$)/gi,'')
+    .replace(/\bUS(?:\s+Highway|\s+Hwy|-)\s*(\d{1,3})(?:\s+[NSEW])?\b/gi,'US $1')
+    .replace(/\b(?:Rt|Rte|Route|NJ)[-\s]?(\d{1,3})(?:\s+[NSEW])?\b/gi,'Route $1')
+    .replace(/\s{2,}/g,' ').replace(/\s+,/g,',').trim();
+}
+function fetchJSON(url, ms=7000){
+  const ctl = ('AbortController' in window) ? new AbortController() : null;
+  const t = ctl ? setTimeout(()=>ctl.abort(), ms) : null;
+  return fetch(url, ctl?{ signal:ctl.signal }:{})
+    .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .finally(()=>{ if(t) clearTimeout(t); });
+}
+async function viaNominatim(q){
+  const d = await fetchJSON('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us'
+    +'&viewbox='+GEO_VIEWBOX+'&q='+encodeURIComponent(q));
+  if(!(Array.isArray(d)&&d.length)) return null;
+  const broad = ['road','street','neighbourhood','suburb','city','town','village','hamlet','county','state','postcode'];
+  return { lat:+d[0].lat, lng:+d[0].lon, exact: !broad.includes(d[0].addresstype) };
+}
+async function viaPhoton(q){
+  const d = await fetchJSON('https://photon.komoot.io/api/?limit=1&lang=en&lat='+GEO_CENTER.lat+'&lon='+GEO_CENTER.lng
+    +'&q='+encodeURIComponent(q));
+  const f = d && d.features && d.features[0];
+  if(!f || (f.properties && f.properties.countrycode && f.properties.countrycode!=='US')) return null;
+  return { lat:+f.geometry.coordinates[1], lng:+f.geometry.coordinates[0], exact: !!(f.properties && f.properties.housenumber) };
+}
+async function lookupAddress(q){
+  const simple = simplifyAddress(q);
+  const tries = [[viaNominatim,q]];
+  if(simple && simple!==q) tries.push([viaNominatim,simple]);
+  tries.push([viaPhoton,q]);
+  if(simple && simple!==q) tries.push([viaPhoton,simple]);
+  let rough = null;                        // best approximate hit, used only if nothing exact turns up
+  for(const [fn,text] of tries){
+    try{
+      const p = await fn(text);
+      if(p && !isNaN(p.lat) && !isNaN(p.lng) && geoKm(p.lat,p.lng) <= GEO_MAX_KM){
+        if(p.exact) return p;
+        if(!rough) rough = p;
+      }
+    }catch(_){ /* network error, rate limit or timeout: fall through to the next option */ }
+  }
+  return rough;
+}
+async function geocode(){
   const q=$('f_addr').value.trim();
   if(!q){ msg('formMsg','Enter an address first.','err'); return; }
+  const btn=$('geoBtn'); btn.disabled=true;
   msg('formMsg','Looking up address…','');
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q))
-    .then(r=>r.json()).then(d=>{
-      if(d&&d.length){ setMarker(+d[0].lat,+d[0].lon); msg('formMsg','Pin placed — drag to fine-tune.','ok'); }
-      else msg('formMsg','Couldn’t find that address. Click the map to place the pin.','err');
-    }).catch(()=>msg('formMsg','Lookup failed. Click the map to place the pin.','err'));
+  try{
+    const p = await lookupAddress(q);
+    if(p && p.exact){ setMarker(p.lat,p.lng); msg('formMsg','Pin placed. Drag it to fine-tune if needed.','ok'); }
+    else if(p){ setMarker(p.lat,p.lng); msg('formMsg','Pin placed near that address, but it may be off. Drag it onto the café, or click the map to move it.','err'); }
+    else msg('formMsg','We couldn’t find that address. Click the map to drop the pin where the café is.','err');
+  } finally { btn.disabled=false; }
 }
 
 /* ---- wire ---- */
